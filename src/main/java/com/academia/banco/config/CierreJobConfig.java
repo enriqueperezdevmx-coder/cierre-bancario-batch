@@ -14,6 +14,7 @@ import org.springframework.batch.core.step.builder.StepBuilder;
 import org.springframework.batch.infrastructure.item.database.JdbcBatchItemWriter;
 import org.springframework.batch.infrastructure.item.database.builder.JdbcBatchItemWriterBuilder;
 import org.springframework.batch.infrastructure.item.file.FlatFileItemReader;
+import org.springframework.batch.infrastructure.item.file.FlatFileParseException;
 import org.springframework.batch.infrastructure.item.file.builder.FlatFileItemReaderBuilder;
 import org.springframework.batch.infrastructure.repeat.RepeatStatus;
 import org.springframework.beans.factory.annotation.Value;
@@ -63,7 +64,7 @@ public class CierreJobConfig {
             .build();
     }
 
-    // Step con chunk(10) para la MP-4
+    // Step de tipo Chunk con tolerancia a fallos (hasta 3 renglones ilegibles omitidos)
     @Bean
     public Step cargarMovimientosStep(JobRepository jobRepository,
                                       PlatformTransactionManager transactionManager,
@@ -75,6 +76,9 @@ public class CierreJobConfig {
             .reader(movimientoReader)
             .processor(new MovimientoProcessor())
             .writer(movimientoWriter)
+            .faultTolerant()
+            .skip(FlatFileParseException.class)
+            .skipLimit(3)
             .build();
     }
 

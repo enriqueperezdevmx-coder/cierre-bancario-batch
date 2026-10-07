@@ -1,28 +1,20 @@
-# Cierre bancario con Spring Batch
-**Autor:** Enrique Pérez Sánchez
-
-## Cómo correrlo
-docker compose up -d --wait
-./correr.sh 2026-09-30 prueba
-./ver-batch.sh
-
-## Dia 2 El primer chunk
+## Dia 3 Parámetros, fallas y reinicio
 
 ### Boleto de salida
-1. **¿Qué diferencia hay entre un step de tipo Tasklet y uno de tipo chunk?**
-   - Un Tasklet ejecuta una sola tarea atómica (por ejemplo, validar si un archivo existe o borrar una tabla) y termina[cite: 8, 20, 50, 70]. Un step de tipo chunk procesa grandes volúmenes de datos iterativamente en bloques mediante tres fases: lectura (`ItemReader`), procesamiento (`ItemProcessor`) y escritura transaccional (`ItemWriter`).
+1. **¿Qué diferencia hay entre una JobInstance y una JobExecution? Usa como ejemplo el cierre del 25.**
+   - La `JobInstance` es el trabajo lógico definido por sus parámetros (`cierreDelDiaJob` del `2026-12-25`). La `JobExecution` es cada intento físico de correrlo[cite: 56, 80].
+   - En el cierre del 25, existió una sola instancia con dos ejecuciones: el intento 1 falló por falta de archivo y el intento 2 lo completó cuando el archivo estuvo listo.
 
-2. **¿Qué hace cada una de las tres piezas de un chunk? ¿Cuál es opcional?**
-   - **ItemReader:** Lee los datos elemento por elemento desde una fuente externa (como un archivo CSV o base de datos).
-   - **ItemProcessor:** Aplica lógica de negocio, validaciones o transformaciones a cada elemento; es la única pieza **opcional**.
-   - **ItemWriter:** Recibe el conjunto completo de elementos acumulados en el chunk y los escribe en lote dentro de una única transacción (por ejemplo, con sentencias SQL por lotes).
+2. **¿En qué caso Spring Batch se niega a correr un cierre, y en qué caso lo reinicia?**
+   - **Se niega (`JobInstanceAlreadyCompleteException`):** Si la instancia ya terminó en `COMPLETED`, para no duplicar operaciones contables ni alterar saldos.
+   - **Lo reinicia:** Si la instancia quedó en `FAILED`, permitiendo crear una nueva ejecución sobre la misma instancia para subsanar el error.
 
-3. **Con 45 movimientos y chunks de 10, ¿cuántos commits habría? ¿Y con chunks de 50?**
-   - Con chunk de 10: **5 commits** ($10 + 10 + 10 + 10 + 5$).
-   - Con chunk de 50: **1 commit** (los 45 entran en una sola transacción).
+3. **En el reinicio del día 5, ¿por qué el step de carga leyó 10 movimientos y no 20?**
+   - Porque el primer chunk (registros 1 al 10) ya se había confirmado en MySQL antes del fallo[cite: 61, 63]. Gracias al contexto de ejecución guardado, Spring Batch retomó la lectura directo desde el registro 11, evitando reprocesar y duplicar datos ya guardados.
 
-4. **¿Por qué el Escritor recibe el chunk completo y no un movimiento a la vez?**
-   - Para optimizar el rendimiento y reducir el costo de I/O y de red; ejecutar inserciones por lotes dentro de una transacción confirmada por bloque es mucho más eficiente que abrir y cerrar transacciones individuales por cada fila
+4. **¿Qué diferencia hay entre un movimiento filtrado y uno omitido?**
+   - **Filtrado (`FILTER_COUNT`):** Regla de negocio en el `ItemProcessor` devolviendo `null` para descartar datos que no aplican al cierre (como `TRANSFERENCIA` o `PAGO`).
+   - **Omitido (`SKIP_COUNT`):** Tolerancia técnica a fallas de formato (`FlatFileParseException` por caracteres inválidos) para no frenar la operación completa del banco si un renglón viene roto.
 
-5. **Mi predicción de la MP-3, paso 1: ¿qué habría pasado sin el Procesador?**
-   - Los registros habrían entrado con inconsistencias tipográficas como `'deposito'`, `'Retiro'` y cadenas con espacios al inicio como `' RETIRO'`, lo que provocaría que agrupaciones o cálculos posteriores fallen o dividan los importes en categorías incorrectas
+5. **¿Por qué importa el código de salida, si el estado ya queda en las tablas?**
+   - Porque los cierres corren de forma desatendida mediante planificadores automáticos (como Control-M)[cite: 65, 80]. El planificador no consulta MySQL: evalúa únicamente el código de salida del sistema operativo (`0` para éxito, distinto de cero para error) para alertar al equipo de guardia y condicionar los trabajos siguientes.
