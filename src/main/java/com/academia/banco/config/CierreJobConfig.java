@@ -63,7 +63,7 @@ public class CierreJobConfig {
             .build();
     }
 
-    // Un Step de tipo Chunk: lee, procesa y escribe de 10 en 10.
+    // Step con chunk(10) para la MP-4
     @Bean
     public Step cargarMovimientosStep(JobRepository jobRepository,
                                       PlatformTransactionManager transactionManager,
